@@ -1,0 +1,610 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+library(tidyverse)
+library(haven)
+
+```
+
+# Read data:
+```{r}
+
+issp_data <- read_rds("../data-processed/ISSP_time-series-data_1985-2018_raw.rds")
+
+```
+
+# Retrieve demographics data:
+
+## 1985:
+```{r}
+
+w85 <- issp_data %>% 
+  filter(year == 1985) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem85 <- w85 %>%
+  select(id, resp_id = v2, country = country, weight = v141,
+         age = v117, sex = v118) %>%
+  mutate(year = "1985",
+         country = case_when(
+           country == "AUS" ~ "Australia",
+           country == "D" ~ "Germany/ West",
+           country == "GB" ~ "Great Britain",
+           country == "USA" ~ "United States",
+           country == "A" ~ "Austria",
+           country == "I" ~ "Italy"),
+         sample = country,
+         country = ifelse(country == "Germany/ West", "Germany", country),
+         # Clean decimal places (from documentation)
+         weight = weight/100000) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 1988
+```{r}
+
+w88 <- issp_data %>% 
+  filter(year == 1988) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem88 <- w88 %>%
+  select(id, resp_id = v2, country = country, weight = v116,
+         age = v66, sex = v65) %>%
+  mutate(year = "1988",
+         country = case_when(
+           country == "AUS" ~ "Australia",
+           country == "D" ~ "Germany/ West",
+           country == "GB" ~ "Great Britain",
+           country == "USA" ~ "United States",
+           country == "A" ~ "Austria",
+           country == "I" ~ "Italy",
+           country == "NL" ~ "Netherlands",
+           country == "IRL" ~ "Ireland",
+           country == "H" ~ "Hungary"),
+         sample = country,
+         country = ifelse(country == "Germany/ West", "Germany", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 1990
+```{r}
+
+w90 <- issp_data %>% 
+  filter(year == 1990) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem90 <- w90 %>%
+  select(id, resp_id = v2, country = country, weight = v114,
+         age = v60, sex = v59) %>%
+  mutate(year = "1990",
+         country = case_when(
+           country == "AUS" ~ "Australia",
+           country == "D-W" ~ "Germany/ West",
+           country == "D-E" ~ "Germany/ East",
+           country == "GB" ~ "Great Britain",
+           country == "NIRL" ~ "Northern Ireland",
+           country == "USA" ~ "United States",
+           country == "I" ~ "Italy",
+           country == "NL" ~ "Netherlands",
+           country == "IRL" ~ "Ireland",
+           country == "H" ~ "Hungary",
+           country == "N" ~ "Norway",
+           country == "IL" ~ "Israel"),
+         sample = country,
+         sample = ifelse(country == "Israel", "Israel/ Jews", sample), # The codebook states that only Jews were surveyed
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 1991
+```{r}
+
+w91 <- issp_data %>% 
+  filter(year == 1991) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem91 <- w91 %>%
+  select(id, resp_id = v2, country = country, weight = v131,
+         age = v78, sex = v77) %>%
+  mutate(year = "1991",
+         country = case_when(
+           country == "AUS" ~ "Australia",
+           country == "D-W" ~ "Germany/ West",
+           country == "D-E" ~ "Germany/ East",
+           country == "GB" ~ "Great Britain",
+           country == "NIRL" ~ "Northern Ireland",
+           country == "USA" ~ "United States",
+           country == "I" ~ "Italy",
+           country == "NL" ~ "Netherlands",
+           country == "IRL" ~ "Ireland",
+           country == "H" ~ "Hungary",
+           country == "N" ~ "Norway",
+           country == "A" ~ "Austria",
+           country == "SLO" ~ "Slovenia",
+           country == "PL" ~ "Poland",
+           country == "IL" ~ "Israel",
+           country == "RP" ~ "Philippines",
+           country == "NZ" ~ "New Zealand",
+           country == "RUS" ~ "Russia"),
+         sample = country,
+         sample = ifelse(country == "Israel", "Israel/ Jews", sample), # The codebook states that only Jews were surveyed
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         weight = ifelse(country == "Australia", 1, weight)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 1994
+```{r}
+
+w94 <- issp_data %>% 
+  filter(year == 1994) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem94 <- w94 %>%
+  select(id, resp_id = v2, country = country, weight = v315,
+         age = v201, sex = v200) %>%
+  mutate(year = "1994",
+         country = str_replace(country, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         country = str_replace(country, "-", "/ "),         
+         sample = country,
+         sample = ifelse(country == "Israel", "Israel/ Jews", sample), # The codebook states that only Jews were surveyed
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 1996
+```{r}
+
+w96 <- issp_data %>% 
+  filter(year == 1996) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem96 <- w96 %>%
+  select(id, resp_id = v2, country = country, weight = v325,
+         age = v201, sex = v200) %>%
+  mutate(year = "1996",
+         country = case_when(
+           country == "AUS" ~ "Australia",
+           country == "D-W" ~ "Germany/ West",
+           country == "D-E" ~ "Germany/ East",
+           country == "GB" ~ "Great Britain",
+           country == "USA" ~ "United States",
+           country == "I" ~ "Italy",
+           country == "NL" ~ "Netherlands",
+           country == "NIRL" ~ "Northern Ireland",
+           country == "IRL" ~ "Ireland",
+           country == "H" ~ "Hungary",
+           country == "N" ~ "Norway",
+           country == "A" ~ "Austria",
+           country == "SLO" ~ "Slovenia",
+           country == "PL" ~ "Poland",
+           country == "IL-J" ~ "Israel/ Jews",
+           country == "IL-A" ~ "Israel/ Arabs",
+           country == "RP" ~ "Philippines",
+           country == "NZ" ~ "New Zealand",
+           country == "RUS" ~ "Russia",
+           country == "S" ~ "Sweden",
+           country == "CZ" ~ "Czech Republic",
+           country == "BG" ~ "Bulgaria",
+           country == "CDN" ~ "Canada",
+           country == "J" ~ "Japan",
+           country == "E" ~ "Spain",
+           country == "LV" ~ "Latvia",
+           country == "F" ~ "France",
+           country == "CY" ~ "Cyprus",
+           country == "CH" ~ "Switzerland"),
+         sample = country,
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 1998
+```{r}
+
+w98 <- issp_data %>% 
+  filter(year == 1998) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem98 <- w98 %>%
+  select(id, resp_id = v2, country = country, weight = v316,
+         il_reg = v299,
+         age = v201, sex = v200) %>%
+  mutate(year = "1998",
+         country = str_replace(country, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         country = str_replace(country, "-", "/ "),         
+         country = case_when(
+           country == "Israel Jews Arabs" ~ "Israel",
+           country == "Slovak Republic" ~ "Slovakia",
+           TRUE ~ country),
+         sample = country,
+         sample = case_when(
+           sample == "Israel" & il_reg == 5 ~ "Israel/ Arabs",
+           sample == "Israel" & il_reg < 5 ~ "Israel/ Jews",
+           TRUE ~ sample),
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country)) %>%
+  mutate_all(~zap_labels(.)) %>% 
+  select(-il_reg)
+
+```
+
+## 2001
+```{r}
+
+w01 <- issp_data %>% 
+  filter(year == 2001) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem01 <- w01 %>%
+  select(id, resp_id = v2, country = country, weight,
+         age = ager, sex) %>%
+  mutate(year = "2001",
+         country = str_replace(country, "-", "/ "),         
+         country = case_when(
+           country == "Southafrica" ~ "South Africa",
+           country == "Israel Jews" ~ "Israel/ Jews",
+           country == "Israel Arabs" ~ "Israel/ Arabs",
+           TRUE ~ country),
+         sample = country,
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 2002
+```{r}
+
+w02 <- issp_data %>% 
+  filter(year == 2002) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem02 <- w02 %>%
+  select(id, resp_id = v3, country = country, weight = v361,
+         il_reg = v306,
+         age = v201, sex = v200) %>%
+  mutate(year = "2002",
+         country = as.character(country),
+         country = case_when(
+           country == "Germany (West) (DE-W)" ~ "Germany/ West",
+           country == "Germany (East) (DE-E)" ~ "Germany/ East",
+           country == "Slovak Republic (SK)" ~ "Slovakia",
+           TRUE ~ country),
+         country = str_replace(country, "\\s\\(.+\\)", ""),
+         sample = country,
+         sample = case_when(
+           sample == "Israel" & il_reg == 5 ~ "Israel/ Arabs",
+           sample == "Israel" & il_reg < 5 ~ "Israel/ Jews",
+           TRUE ~ sample),
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country == "Belgium/ Flanders", "Belgium", country)) %>%
+  mutate_all(~zap_labels(.)) %>% 
+  select(-il_reg)
+
+```
+
+## 2003
+```{r}
+
+w03 <- issp_data %>% 
+  filter(year == 2003) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem03 <- w03 %>%
+  select(id, resp_id = v3, country = country, weight,
+         age, sex) %>%
+  mutate(year = "2003",
+         country = str_replace(country, "\\s\\(.+\\)", ""), 
+         country = str_replace(country, "-", "/ "),         
+         country = case_when(
+           country == "Israel Jews" ~ "Israel/ Jews",
+           country == "Israel Arabs" ~ "Israel/ Arabs",
+           country == "Korea" ~ "South Korea",
+           TRUE ~ country),
+         sample = country,
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 2004
+```{r}
+
+w04 <- issp_data %>% 
+  filter(year == 2004) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem04 <- w04 %>%
+  select(id, resp_id = v3, country = country, weight = v381,
+         il_reg = v320,
+         age = v201, sex = v200) %>%
+  mutate(year = "2004",
+         country = str_replace(country, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         country = str_replace(country, "-", "/ "),         
+         country = case_when(
+           country == "Flanders (Belgium)" ~ "Belgium/ Flanders",
+           TRUE ~ country),
+         sample = country,
+         sample = case_when(
+           sample == "Israel" & il_reg == 5 ~ "Israel/ Arabs",
+           sample == "Israel" & il_reg < 5 ~ "Israel/ Jews",
+           TRUE ~ sample),
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country == "Belgium/ Flanders", "Belgium", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country)) %>%
+  mutate_all(~zap_labels(.)) %>% 
+  select(-il_reg)
+
+```
+
+## 2006
+```{r}
+
+w06 <- issp_data %>% 
+  filter(year == 2006) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem06 <- w06 %>%
+  select(id, resp_id = v2, country, weight,
+         age, sex) %>%
+  mutate(year = "2006",
+         country = str_replace(country, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         country = str_replace(country, "-", "/ "),         
+         sample = country,
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 2008
+```{r}
+
+w08 <- issp_data %>% 
+  filter(year == 2008) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem08 <- w08 %>%
+  select(id, resp_id = v3, country, weight,
+         age, sex) %>%
+  mutate(year = "2008",
+         country = str_replace(country, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         country = str_replace(country, "-", "/ "),         
+         country = case_when(
+           country %in% c("Israel, Jews", "Israel, Arabs") ~ str_replace(country, ",", "/"), 
+           country == "Italy: 2008, first fieldwork" ~ "Italy",
+           country == "Italy: 2010, second fieldwork" ~ "Italy",
+           TRUE ~ country),
+         sample = country,
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country),
+         country = ifelse(country == "Belgium/ Flanders", "Belgium", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 2012
+```{r}
+
+w12 <- issp_data %>% 
+  filter(year == 2012) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem12 <- w12 %>%
+  select(id, resp_id = caseid, country, weight,
+         il_reg,
+         age, sex) %>%
+  mutate(year = "2012",
+         country = str_replace(country, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         country = str_replace(country, "-", "/ "),         
+         country = case_when(
+           country == "Korea (South)" ~ "South Korea",
+           country == "Portugal 2012: first fieldwork round (main sample)" ~ "Portugal", # Not sure about this
+           country == "Portugal 2012: second fieldwork round (complementary sample)" ~ "Portugal",
+           TRUE ~ country),
+         sample = country,
+         sample = case_when(
+           sample == "Israel" & il_reg == 5 ~ "Israel/ Arabs",
+           sample == "Israel" & il_reg < 5 ~ "Israel/ Jews",
+           TRUE ~ sample),
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Belgium/ Brussels", "Belgium/ Flanders", 
+                                     "Belgium/ Wallonia"), "Belgium", country)) %>%
+  mutate_all(~zap_labels(.)) %>% 
+  select(-il_reg)
+
+```
+
+## 2013
+```{r}
+
+w13 <- issp_data %>% 
+  filter(year == 2013) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem13 <- w13 %>%
+  select(id, resp_id = caseid, country, weight,
+         age, sex) %>%
+  mutate(year = "2013",
+         country = str_replace(country, "^\\d+\\s", ""),
+         country = str_replace(country, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         country = str_replace(country, "-", "/ "),
+         country = case_when(
+           country == "Korea (South)" ~ "South Korea",
+           country == "Slovak Republic" ~ "Slovakia",
+           country == "Portugal:2013:first fieldwork round (main sample)" ~ "Portugal",
+           country == "Portugal:2013:second fieldwork round (complementary)" ~ "Portugal",
+           TRUE ~ country),
+         sample = country,
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country),
+         country = ifelse(country %in% c("Belgium/ Brussels", "Belgium/ Flanders",
+                                     "Belgium/ Wallonia"), "Belgium", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+
+## 2014
+```{r}
+
+w14 <- issp_data %>% 
+  filter(year == 2014) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem14 <- w14 %>%
+  select(id, resp_id = caseid, country, weight, 
+         age, sex) %>%
+  mutate(year = "2014",
+         country = str_replace(country, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         country = str_replace(country, "-", "/ "),
+         country = str_replace(country, ",", "/"),
+         country = case_when(
+           country == "Korea (South)" ~ "South Korea",
+           country == "Slovak Republic" ~ "Slovakia",
+           country == "Venezeula" ~ "Venezuela",
+           TRUE ~ country),
+         sample = country,
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country),
+         country = ifelse(country %in% c("Belgium/ Brussels", "Belgium/ Flanders",
+                                     "Belgium/ Wallonia"), "Belgium", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 2016
+```{r}
+
+w16 <- issp_data %>% 
+  filter(year == 2016) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem16 <- w16 %>%
+  select(id, resp_id = caseid, sample = c_sample, weight,
+         age, sex) %>%
+  mutate(year = "2016",
+         sample = as_factor(sample),
+         sample = str_replace(sample, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         sample = str_replace(sample, "-", "/ "),
+         sample = case_when(
+           sample == "Korea (South)" ~ "South Korea",
+           sample == "Jews" ~ "Israel/ Jews",
+           sample == "Arabs" ~ "Israel/ Arabs",
+           TRUE ~ sample),
+         country = sample,
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country),
+         country = ifelse(country %in% c("Belgium/ Brussels", "Belgium/ Flanders",
+                                     "Belgium/ Wallonia"), "Belgium", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 2017
+```{r}
+
+w17 <- issp_data %>% 
+  filter(year == 2017) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem17 <- w17 %>%
+  select(id, resp_id = caseid, country, sample = c_sample, weight,
+         age, sex) %>%
+  mutate(year = "2017",
+         sample = as_factor(sample),
+         sample = str_replace(sample, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         sample = str_replace(sample, "-", "/ "),
+         sample = case_when(
+           sample == "Jews" ~ "Israel/ Jews",
+           sample == "Arabs" ~ "Israel/ Arabs",
+           sample == "Slovak Republic" ~ "Slovakia",
+           TRUE ~ sample),
+         country = sample,
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+## 2018
+```{r}
+
+w18 <- issp_data %>% 
+  filter(year == 2018) %>% 
+  pull(data) %>% 
+  .[[1]]
+
+dem18 <- w18 %>%
+  select(id, resp_id = caseid, country, sample = c_sample, weight,
+         age, sex) %>%
+  mutate(year = "2018",
+         sample = as_factor(sample),
+         sample = str_replace(sample, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         sample = str_replace(sample, "-", "/ "),
+         sample = case_when(
+           sample == "Korea (South)" ~ "South Korea",
+           sample == "Jews" ~ "Israel/ Jews",
+           sample == "Arabs" ~ "Israel/ Arabs",
+           sample == "Slovak Republic" ~ "Slovakia",
+           TRUE ~ sample),
+         country = sample,
+         country = ifelse(country %in% c("Germany/ West", "Germany/ East"), "Germany", country),
+         country = ifelse(country %in% c("Israel/ Jews", "Israel/ Arabs"), "Israel", country)) %>%
+  mutate_all(~zap_labels(.))
+
+```
+
+# Combine demographics data sets:
+```{r}
+
+issp_demog <- bind_rows(dem85, dem88, dem90,
+                        dem91, dem94, dem96,
+                        dem98, dem01, dem02,
+                        dem03, dem04, dem06,
+                        dem08, dem12, dem13, 
+                        dem14, dem16, dem17, 
+                        dem18) %>%
+  select(id, year, country, sample, weight, everything()) %>%
+  select(-resp_id) %>% 
+  mutate(year = as.double(year),
+         sex = case_when(sex == 1 ~ "Male", 
+                         sex == 2 ~ "Female",
+                         TRUE ~ NA_character_))
+
+write_rds(issp_demog, "../data-processed/ISSP_demographics-data.rds")
+
+```
+
+
+
+

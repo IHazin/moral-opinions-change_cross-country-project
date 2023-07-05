@@ -1,0 +1,479 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+
+library(tidyverse)
+library(lme4)
+library(boot)
+library(ggrepel)
+
+```
+
+# Read data:
+```{r}
+
+# Aggregated time-series data plus argument advantage data:
+issp_common_issues <- read_rds("../data-processed/ISSP_15-issues-measured-in-the-same-14-countries.rds")
+wvsevs_common_issues <- read_rds("../data-processed/WVS_10-issues-measured-in-the-same-50-countries.rds")
+
+```
+
+# Time trends:
+
+Time trends functions:
+```{r}
+
+estimate_logit_cntry <- function(data) {
+ m <- glm(cbind(n_agree, n_disagree) ~ year_r + sample,
+          data, 
+          family = quasibinomial(link = "logit"))
+ coef(m)["year_r"]
+}
+
+estimate_logit <- function(data) {
+ m <- glm(cbind(n_agree, n_disagree) ~ year_r,
+          data, 
+          family = quasibinomial(link = "logit"))
+ coef(m)["year_r"]
+}
+
+```
+
+Calculate time trends, by issue:
+```{r}
+
+# ISSP:
+issp_common_issues_byissue <- issp_common_issues %>%
+  group_nest(issue, label, hflv) 
+
+issp_trends <- issp_common_issues_byissue %>%
+  mutate(logit_est = map_dbl(data, estimate_logit_cntry)) 
+
+
+# WVS/EVS:
+wvsevs_common_issues_byissue <- wvsevs_common_issues %>%
+  group_nest(issue, label, hflv) 
+
+wvsevs_trends <- wvsevs_common_issues_byissue %>%
+  mutate(logit_est = map_dbl(data, estimate_logit_cntry)) 
+
+```
+
+# Results:
+
+## Table 1:
+```{r}
+
+issp_trends %>% 
+  select(-data) %>% 
+  mutate(source = "ISSP") %>% 
+  bind_rows(wvsevs_trends %>% 
+              select(-data) %>% 
+              mutate(source = "WVS")) %>% 
+  mutate_at(vars(hflv, logit_est), ~round(., 2)) %>%
+  select(Source = source, Opinion = label, `Global change rate` = logit_est, `Arg. adv.` = hflv) %>%
+  arrange(Source, desc(`Arg. adv.`)) %>% 
+  kableExtra::kbl() %>% 
+  kableExtra::kable_classic(full_width = FALSE)
+  
+```
+
+## Hypothesis 1: Moral Argument Realism. 
+
+Read data:
+```{r}
+
+# Argument advantage data - long format:
+aa_long <- read_rds("../data-processed/argument-advantage-data_US & Greece_long_clean.rds") %>% 
+  select(id, country, age, gender, source, issue, answer, position:argument, mf, value, value_sc) 
+
+# Create age groups:
+median_age <- aa_long %>% 
+  distinct(country, id, age) %>% 
+  summarise(median(age)) %>% 
+  pull(`median(age)`)
+
+aa_long <- aa_long %>%
+  mutate(age = as.numeric(age),
+         age_group = ifelse(age > median_age, "Older", "Younger")) 
+  
+```
+
+Calculate pro-positions' argument advantage in each subsample:
+```{r}
+
+# Function to get susamples' argument advantage:
+get_subsamples_aa <- function(data, group) {
+
+# Calculate moral foundations' average applicability per issue position:
+mf_app <- data %>% 
+  group_by({{group}}, source, issue, position, mf) %>% 
+  summarise(value_sc = mean(value_sc, na.rm = TRUE))  
+
+# Calculate pro-positions' argument advantage:
+mf_adv <- mf_app %>% 
+  spread(position, value_sc) %>% 
+  mutate(arg_adv = yes - no) %>% 
+  select(-no, -yes) %>% 
+  spread(mf, arg_adv) %>% 
+  mutate(hflv_pro = (harm + fair + libe + viol)/4)
+
+mf_adv <- mf_adv %>% 
+  select({{group}}, source, issue, hflv_pro) %>% 
+  spread({{group}}, hflv_pro) %>% 
+  rename(Source = source)
+
+# Return:
+mf_adv
+
+}
+
+
+# United states vs. Greece:
+mf_adv_bycountry <- get_subsamples_aa(aa_long, country)
+
+# Males vs. Females:
+mf_adv_bygender <- get_subsamples_aa(aa_long, gender) %>% 
+  select(-Other)
+
+# Younger vs. Older:
+mf_adv_byage <- get_subsamples_aa(aa_long, age_group)
+
+```
+
+Get observed concordance correlation coefficients (CCCs):
+```{r}
+
+# US vs. Greece:
+ccc_country <- DescTools::CCC(mf_adv_bycountry$`United States of America`, mf_adv_bycountry$Greece)$rho.c
+
+# Female vs. Male:
+ccc_gender <- DescTools::CCC(mf_adv_bygender$Male, mf_adv_bygender$Female)$rho.c
+
+# Older vs. Younger:
+ccc_age <- DescTools::CCC(mf_adv_byage$Older, mf_adv_byage$Younger)$rho.c
+
+
+ccc_data <- bind_rows(ccc_country %>% mutate(var = "country"),
+                      ccc_gender %>% mutate(var = "gender"),
+                      ccc_age %>% mutate(var = "age_group")) %>% 
+  select(var, obs_ccc = est)
+
+```
+
+Get bootstrap CIs for the CCCs:
+```{r}
+
+# Function to bootstrap:
+bootstrap_CCC <- function(data, i) {
+
+  group1 <- pull(data[, 3])
+  group2 <- pull(data[, 4])
+
+  # Run and retrieve CCC:
+  DescTools::CCC(group1[i], group2[i])$rho.c[1, 1]
+
+}
+
+# Overarching function to obtain percentile bootstrap CIs:
+getbootcis <- function(data) {
+  
+  # Bootstrap CI:
+  boot_ccc <- boot(data, bootstrap_CCC, 1000)
+  boot_ci <- boot.ci(boot_ccc)$percent
+  
+  return(tibble(lower_ci = boot_ci[4],
+                upper_ci = boot_ci[5]))
+  
+}
+
+# Bootstrap CCC values and confidence intervals:
+set.seed(1)
+
+# Country:
+bootci_country <- getbootcis(mf_adv_bycountry) %>% 
+  mutate(var = "country")
+
+# Gender:
+bootci_gender <- getbootcis(mf_adv_bygender) %>% 
+  mutate(var = "gender")
+
+# Age:
+bootci_age <- getbootcis(mf_adv_byage) %>% 
+  mutate(var = "age_group")
+
+# Incorporate values to ccc_data:
+ccc_data <- ccc_data %>% 
+  left_join(bind_rows(bootci_country, bootci_gender, bootci_age))
+
+```
+
+Figure 1:
+```{r}
+
+# Function to get scatter-plots:
+plot_ccc <- function(data, Source) {
+  
+subsample1 <- pull(data[, 3])
+subsample2 <- pull(data[, 4])
+  
+  ggplot(data = data,
+         aes(x = subsample1, y = subsample2)) +
+  geom_point(aes(color = Source)) +
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +
+  scale_x_continuous(limits = c(-0.6, 0.6),
+                      breaks = c(-.6, -.4, -.2, 0, .2, .4, .6)) +
+  scale_y_continuous(limits = c(-0.6, 0.6),
+                      breaks = c(-.6, -.4, -.2, 0, .2, .4, .6)) +
+  scale_color_manual(values = c("green4", "red3")) +
+  geom_abline() +
+  theme_classic() + 
+  labs(x = names(data)[3], y = names(data)[4])
+  
+}
+
+# Plot United States vs. Greece:
+aa_us_greece <- plot_ccc(mf_adv_bycountry, Source) +
+  theme(legend.position = "none")
+
+# Plot Males vs. Females:
+aa_female_male <- plot_ccc(mf_adv_bygender, Source) +
+  theme(legend.position = "none")
+
+# Plot younger vs. Older:
+aa_older_younger <- plot_ccc(mf_adv_byage %>% mutate(Source = ifelse(Source == "WVS/EVS", "WVS", Source)), Source) + 
+  theme(legend.title = element_blank())
+
+
+# Get graphs' labels:
+ccc_labels <- ccc_data %>%
+  mutate(label = sprintf("%.2f [%.2f, %.2f]", obs_ccc, lower_ci, upper_ci)) %>%
+  select(var, label) %>%
+  mutate(ccc = paste0("CCC = ", label))
+
+
+# Figure 1:
+cowplot::plot_grid(aa_us_greece +
+                     geom_text(data = ccc_labels[ccc_labels$var == "country", ], aes(label = ccc), x = -.2, y = .5),
+                   aa_female_male +
+                     geom_text(data = ccc_labels[ccc_labels$var == "gender", ], aes(label = ccc), x = -.2, y = .5),
+                   aa_older_younger +
+                     geom_text(data = ccc_labels[ccc_labels$var == "age_group", ], aes(label = ccc), x = -.2, y = .5),
+                   nrow = 1, align = "hv", labels = c("A", "B", "C"),
+                   rel_widths = c(1, 1, 1.3))
+
+ggsave("../figure1.jpeg", width = 12, height = 4)
+
+```
+
+Expected CCCs under true perfect agreement:
+```{r}
+
+# Calculate probability of belonging to a given group (e.g., prob. of being female):
+get_prob <- function(data, group_var) {
+  group_var <- enquo(group_var)
+  
+  data %>%
+    drop_na(!!group_var) %>% 
+    summarise(prob = mean(!!group_var == first(!!group_var))) %>% 
+    mutate(var = as_label(group_var))
+}
+
+aa_long_id <- aa_long %>% 
+  distinct(id, country, gender, age_group)
+
+# Probability table:
+prob_table <- bind_rows(
+  get_prob(aa_long_id, country),
+  get_prob(aa_long_id[aa_long_id$gender != "Other", ], gender),
+  get_prob(aa_long_id, age_group))
+
+ccc_data <- left_join(ccc_data, prob_table)
+
+# For each group, simulate 1,000 random splits of the pool of participants, and measure the agreement (CCC) between the two sub-samples in each split:
+estimate_random_group_ccc <- function(data, p = .5) {
+  
+  # Randomly split the data:
+  rand_split <- data %>% 
+    distinct(id) %>% 
+    mutate(rand_gr = rbinom(n = n(), size = 1, prob = p),
+           rand_gr = factor(rand_gr))
+
+  data %>% 
+    left_join(rand_split, by = "id") %>% 
+    # Calculate pro-positions' hflv advantage:
+    group_by(issue, position, mf, rand_gr) %>%
+    summarise(link = mean(value_sc, na.rm = TRUE), .groups = "drop") %>%
+    spread(position, link) %>% 
+    mutate(arg_adv = yes - no) %>% 
+    select(-no, -yes) %>% 
+    spread(mf, arg_adv) %>% 
+    mutate(hflv_pro = (harm + fair + libe + viol)/4) %>% 
+    select(rand_gr, issue, hflv_pro) %>%
+    # calculate CCC:
+    spread(rand_gr, hflv_pro) %>% 
+    summarise(ccc = DescTools::CCC(`0`, `1`)$rho.c$est) %>% 
+    pull(ccc)
+}
+
+make_1000_draws <- function(prob) {
+  map_dbl(1:1000, ~estimate_random_group_ccc(aa_long, prob))
+}
+
+# This takes around 5 minutes to run:
+ccc_data_complete <- ccc_data %>%
+  mutate(rand_ccc = map(prob, make_1000_draws)) %>%
+  mutate(p = map2_dbl(obs_ccc, rand_ccc, ~mean(.y < .x)),
+         mean_rand = map_dbl(rand_ccc, mean))
+
+```
+
+## Hypothesis 2: Accounting for the Global Change in Moral Norms Using Argument Advantage.
+
+Figure 2A: WVS/EVS
+```{r}
+
+# Get correlation and R2:
+cor.test(wvsevs_trends$logit_est, wvsevs_trends$hflv, method = "pearson")
+
+r2 <- sprintf("Rsq = %.2f", cor(wvsevs_trends$logit_est, wvsevs_trends$hflv)^2)
+
+# Scatter plot: Estimated global change rate plotted against argument advantage. 
+(fig2_wvsevs <- wvsevs_trends %>% 
+  ggplot(aes(hflv, logit_est, label = label)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_vline(xintercept = 0, linetype = 2) +
+  geom_smooth(method = lm, color = "midnightblue") +
+  geom_point() +
+  geom_text_repel() +
+  annotate("text", x = -0.26, y = 0.51, label = r2) +
+  scale_x_continuous(limits = c(-0.35, 0.55), n.breaks = 11) +
+  labs(x = "Argument advantage",
+       y = "Global change rate") +
+  theme_classic(base_size = 13) +
+  ggtitle("Opinions measured in the WVS"))
+
+# Slope of change rate on argument advantage:
+wvsevs_trends %>%
+  lm(data = ., logit_est ~ hflv) %>% 
+  summary()
+
+```
+
+Figure 2B: ISSP
+```{r}
+
+# Get correlation and R2:
+cor.test(issp_trends$logit_est, issp_trends$hflv, method = "pearson")
+
+r2 <- sprintf("Rsq = %.2f", cor(issp_trends$logit_est, issp_trends$hflv)^2)
+
+# Scatter plot: Estimated global change rate plotted against argument advantage. 
+(fig2_issp <- issp_trends %>% 
+  ggplot(aes(hflv, logit_est, label = label)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_vline(xintercept = 0, linetype = 2) +
+  geom_smooth(method = lm, color = "midnightblue") +
+  geom_point() +
+  geom_text_repel() +
+  annotate("text", x = -0.4, y = 0.25, label = r2) +
+  scale_x_continuous(limits = c(-0.5, 0.5), n.breaks = 11) +
+  labs(x = "Argument advantage",
+       y = "Global change rate") +
+  theme_classic(base_size = 13) +
+  ggtitle("Opinions measured in the ISSP"))
+
+# Slope of change rate on argument advantage:
+issp_trends %>%
+  lm(data = ., logit_est ~ hflv) %>% 
+  summary()
+
+```
+
+Combine plots:
+```{r}
+
+cowplot::plot_grid(fig2_wvsevs, fig2_issp, labels = "AUTO")
+
+ggsave("../figure2.jpeg", dpi = 350, height = 5, width = 10)
+
+```
+
+Figure 3: Correlations between argument advantages and opinion change rates in each individual country.
+
+Calculate time trends, by issue and country:
+```{r}
+
+# ISSP:
+issp_common_issues_bysample <- issp_common_issues %>%
+  group_nest(issue, label, sample, hflv) 
+
+issp_trends_bysample <- issp_common_issues_bysample %>%
+  mutate(logit_est = map_dbl(data, estimate_logit))
+
+# WVS/EVS:
+wvsevs_common_issues_bysample <- wvsevs_common_issues %>%
+  group_nest(issue, label, sample, hflv) 
+
+wvsevs_trends_bysample <- wvsevs_common_issues_bysample %>%
+  mutate(logit_est = map_dbl(data, estimate_logit))
+
+
+# Save trends for supplementary tables:
+write_rds(issp_trends_bysample, "../data-processed/ISSP_trends-by-issue-and-country.rds")
+write_rds(wvsevs_trends_bysample, "../data-processed/WVS_trends-by-issue-and-country.rds")
+
+```
+
+```{r}
+
+# Get each country's correlation between argument advantages and opinion change rates:
+cor_wvs <- wvsevs_trends_bysample %>%
+  group_by(sample) %>% 
+  summarise(r = cor(logit_est, hflv)) 
+
+cor_issp <- issp_trends_bysample %>%
+  group_by(sample) %>% 
+  summarise(r = cor(logit_est, hflv)) 
+
+cor_comb <- bind_rows(
+  cor_issp %>% mutate(source = "ISSP"), 
+  cor_wvs %>% mutate(source = "WVS")
+)
+
+# Box-plots:
+cor_comb %>% 
+  mutate(source = fct_rev(source)) %>% 
+  ggplot(aes(x = source,  y = r)) +
+  geom_boxplot() +
+  geom_point(position = position_jitter(width = .05)) +
+  ggrepel::geom_text_repel(aes(label = sample), size = 3, max.overlaps = 14) +
+  geom_hline(yintercept = 0, color = "grey50") +
+  labs(x = NULL, y = "Correlation between argument advantage\nand opinion change rate") +
+  annotate("text", x = 0.5, y = 1, label = "A", fontface = "bold", size = 6) +
+  annotate("text", x = 1.5, y = 1, label = "B", fontface = "bold", size = 6) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        axis.title.y = element_text(size = 15))
+
+ggsave("../figure3.jpeg", dpi = 350, width = 10, height = 7)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

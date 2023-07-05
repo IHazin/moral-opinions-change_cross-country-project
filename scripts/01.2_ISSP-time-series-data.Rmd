@@ -1,0 +1,222 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+library(tidyverse)
+library(haven)
+
+```
+
+Instructions:
+
+1. Go to https://issp.org/data-download/by-year/
+
+2. Download the following files: 
+  * ZA1490.sav (Role of Government I - ISSP 1985)
+  * ZA1700_2005-11-24.sav (Family and Changing Gender Roles I - ISSP 1988)
+  * ZA1950_2006-04-12.sav (Role of Government II - ISSP 1990)
+  * ZA2150_2006-04-24.sav (Religion I - ISSP 1991)
+  * ZA2620_2005-12-14.sav (Family and Changing Gender Roles II - ISSP 1994)
+  * ZA2900_2006-04-12.sav (Role of Government III - ISSP 1996)
+  * ZA3190_2006-04-27.sav (Religion II - ISSP 1998)
+  * ZA3680_2006-03-06.sav (Social Relations and Support Systems - ISSP 2001)
+  * ZA3880_v1-1-0.sav (Family and Changing Gender Roles III - ISSP 2002)
+  * ZA3910_v2-1-0.sav (National Identity II - ISSP 2003)
+  * ZA3950_v1-3-0.sav (Citizenship - ISSP 2004)
+  * ZA4700.sav (Role of Government IV - ISSP 2006)
+  * ZA4950_v2-3-0.sav (Religion III - ISSP 2008)
+  * ZA5900_v4-0-0.sav (Family and Changing Gender Roles IV - ISSP 2012)
+  * ZA5950_v2-0-0.sav (National Identity III - ISSP 2013)
+  * ZA6670_v2-0-0.sav (Citizenship II - ISSP 2014)
+  * ZA6900_v2-0-0.sav (Role of Government V - ISSP 2016)
+  * ZA6980_v2-0-0.sav (Social Networks and Social Resources - ISSP 2017)
+  * ZA7570_v2-0-0.sav (Religion IV - ISSP 2018)
+
+3. Place files into '../data-raw/ISSP-data_1985-2018/'
+
+# Read data:
+```{r}
+
+issp_issues <- read_csv("../data-raw/ISSP_list-of-moral-issues.csv")
+file_names <- str_subset(dir("../data-raw/ISSP-data_1985-2018/"), ".sav$")
+
+issp_issues_nested <- issp_issues %>% 
+  group_by(year, file_name) %>% 
+  nest() %>% 
+  rename(var_match = data)
+
+# Read all 19 data files:
+issp_data <- tibble(file_name = file_names, 
+                    data = map(file_names, ~read_sav(paste0("../data-raw/ISSP-data_1985-2018/", .x)))) %>% 
+  mutate(data = map(data, rename_all, tolower))
+  
+```
+
+# Clean data:
+```{r}
+
+# Get the names and labels of all variables:
+issp_data <- issp_data %>% 
+  mutate(labs = map(issp_data$data, ~tibble(var = names(.x),
+                                            label = map_chr(.x, attr, "label"),
+                                            value_labels = map(.x, attr, "labels"))))
+
+# Identify country variable in each data-set:
+country_var <- issp_data %>% 
+  select(-data) %>% 
+  unnest(labs) %>% 
+  filter(str_detect(label, fixed("country", ignore_case = TRUE))) %>% 
+  group_by(file_name) %>% 
+  slice(1)
+  
+# Rename country variable in each data-set:
+issp_data <- issp_data %>%
+  left_join(country_var %>% select(file_name, var)) %>% 
+  mutate(var = tolower(var),
+         data = map2(data, var, ~.x %>% 
+                                    rename("country" = .y) %>% 
+                                    mutate(country = as_factor(country),
+                                           id = 1:nrow(.x))))
+
+# Filter moral issues:
+issp_data <- issp_data %>% 
+  left_join(issp_issues_nested) %>% 
+  drop_na(year)
+         
+issp_data <- issp_data %>%
+  mutate(data_subset = map2(data, var_match, ~.x %>% 
+                                                 select("country", "id", set_names(.y$coding, .y$issue))))
+
+# Save data-set for demographics script (01.2_ISSP-demographics)
+write_rds(issp_data, "../data-processed/ISSP_time-series-data_1985-2018_raw.rds")
+
+issp_data <- issp_data %>% 
+  select(year, data_subset) %>% 
+  mutate(data_subset = map(data_subset, zap_labels)) %>% 
+  unnest(data_subset)
+
+# Clean country variables:
+issp_data <- issp_data %>% 
+  mutate(country_messy = country,
+         # Remove digits from the beginning of a country name:
+         country = str_replace(country, "^\\d+\\s", ""),
+         country = str_replace(country, "^[:upper:]+-?([:upper:]+(?![:lower:]))?(\\s*-\\s*|\\s)", ""),
+         country = str_replace(country, " - [:upper:]+-?([:upper:]+)?", ""),
+         country = str_replace(country, "\\s\\(.+\\)", ""), 
+         country = str_replace(country, "( \\d+)?:.+", ""),
+         # Combine subsamples:
+         country = str_replace(country, "Israel.+", "Israel"),
+         country = str_replace(country, "Germany.+", "Germany"),
+         country = str_replace(country, "Belgium.+", "Belgium"),
+         # Correct typos:
+         country = str_replace_all(country, c("Southafrica" = "South Africa",
+                                              "Venezeula" = "Venezuela",
+                                              "Surinam$" = "Suriname",
+                                              "Slovak Republic" = "Slovakia",
+                                              "North Ireland" = "Northern Ireland",
+                                              "Great Britain and/or United Kingdom" = "Great Britain",
+                                              "Czech Rep$" = "Czech Republic",
+                                              "Flanders" = "Belgium",
+                                              "Korea" = "South Korea",
+                                              "South South Korea" = "South Korea")))
+
+# Create a look-up table for data-sets where only country codes were used:
+country_codes <- issp_data %>% 
+  filter(!str_detect(country, "[:upper:][:lower:]+")) %>%
+  count(country)
+
+country_list <- issp_data %>% 
+  select(country_messy) %>% 
+  distinct() %>% 
+  filter(str_detect(country_messy, "^[:upper:]+-[:upper:][:lower:]+")) %>% 
+  separate(country_messy, c("country_code", "country"), sep = "-") %>% 
+  # Drop duplicate codes:
+  group_by(country_code) %>%
+  slice(1)
+
+country_list$country_code <- paste0("^", country_list$country_code, "$") 
+repl_pattern <- set_names(country_list$country, country_list$country_code)
+repl_pattern <- c(repl_pattern, 
+                  "^D-E$" = "Germany", 
+                  "^D-W$" = "Germany", 
+                  "^D$" = "Germany",
+                  "^IL-A$" = "Israel", 
+                  "^IL-J$" = "Israel")
+repl_pattern["^IL$"] <- "Israel"
+repl_pattern["^SK$"] <- "Slovakia"
+repl_pattern["^IT$"] <- "Italy"
+
+issp_data <- issp_data %>% 
+  mutate(country = ifelse(country %in% country_codes$country, str_replace_all(country_messy, repl_pattern), country))
+
+```
+
+# Re-code answers to 0/1:
+
+CODEBOOK:
+
+verdict: "Convict innocent" (1); "Free the guilty" (0)
+
+protest1, protest3: "Definitely allowed", "Probably allowed" (1); "Probably not allowed", "Definitely not allowed" (0)
+
+racmeet: "Should definitely be allowed", "Should probably be allowed" (1); "Should probably not be allowed", "Should definitely not be allowed" (0)
+
+xmarsex1, premars1, homosex1, abpoorw, abdefctw: "Always wrong", "Almost always wrong" (1); "Wrong only sometimes", "Not wrong at all" (0)
+
+cohabok, firstyou, helpfrds, immrghts, hubbywrk, hubbywk1, marlegit: "Strongly agree", "Agree" (1); "Neither Agree nor Disagree", "Disagree", "Strongly disagree" (0)
+
+```{r}
+
+issp_data_recoded <- issp_data %>% 
+  mutate(verdict = ifelse(verdict == 1, 1, 0)) %>% 
+  mutate_at(vars(protest1, protest3, racmeet), ~ifelse(. <= 2, 1, 0)) %>% 
+  mutate_at(vars(xmarsex1, premars1, homosex1, abpoorw, abdefctw), ~case_when(. < 3 ~ 1, 
+                                                                              . %in% c(3, 4) ~ 0,
+                                                                              TRUE ~ NA_real_)) %>% 
+  mutate_at(vars(cohabok, firstyou, helpfrds, immrghts, hubbywrk, hubbywk1, marlegit), ~case_when(. <= 2 ~ 1,
+                                                                                                  . >= 3 ~ 0,
+                                                                                                  TRUE ~ NA_real_))
+
+# Reshape data to long format:
+issp_data_long <- issp_data_recoded %>% 
+  select(-country_messy) %>% 
+  pivot_longer(cols = c(-year:-id), 
+               names_to = "issue", 
+               values_to = "opinion") %>% 
+  drop_na(opinion)
+
+# 'hubbywk1' is the same as 'hubbywrk':
+issp_data_long <- issp_data_long %>%
+  mutate(issue = ifelse(issue == "hubbywk1", "hubbywrk", issue))
+
+```
+
+# Add demographics to main data set:
+```{r}
+
+# Run demographics scripts:
+source(file = "../scripts/01.2_ISSP-demographics.Rmd")
+
+issp_demog <- read_rds("../data-processed/ISSP_demographics-data.rds")
+
+issp_data_long <- issp_data_long %>% 
+  mutate(year = as.numeric(year)) %>% 
+  left_join(issp_demog) %>%
+  select(year, country, sample, resp_id = id, age, sex, weight, everything()) 
+
+write_rds(issp_data_long, "../data-processed/ISSP_time-series-data_1985-2018_long.rds")
+
+```
+
+
+
+
+
+
+
+
+
+

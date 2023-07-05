@@ -1,0 +1,110 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+library(tidyverse)
+library(haven)
+
+```
+
+# Read data:
+```{r}
+
+# Aggregated time-series data plus argument advantage data:
+aggr_data <- read_rds("../data-processed/ISSP_WVS-EVS_aggregated-time-series-data-plus-aa-data_clean.rds")
+
+```
+
+# Time trends:
+
+Time trends function:
+```{r}
+
+estimate_logit <- function(data) {
+ m <- glm(cbind(n_agree, n_disagree) ~ year_r,
+          data, 
+          family = quasibinomial(link = "logit"))
+ coef(m)["year_r"]
+}
+
+```
+
+Calculate time trends, by issue and country:
+```{r}
+
+# ISSP:
+issp_byissue <- aggr_data %>%
+  filter(source == "ISSP") %>% 
+  group_nest(source, issue, sample, hflv) 
+
+issp_trends <- issp_byissue %>%
+  mutate(logit_est = map_dbl(data, estimate_logit))
+
+# WVS/EVS:
+wvsevs_byissue <- aggr_data %>%
+  filter(source == "WVS") %>% 
+  group_nest(source, issue, sample, hflv) 
+
+wvsevs_trends <- wvsevs_byissue %>%
+  mutate(logit_est = map_dbl(data, estimate_logit))
+
+# Pool ISSP and WVS/EVS data:
+trends_aa_data <- issp_trends %>%
+  bind_rows(wvsevs_trends)
+
+```
+
+# Results:
+
+Countries included in the analysis:
+```{r}
+
+aggr_data %>% 
+  distinct(sample) %>% 
+  nrow()
+
+```
+
+Average number of countries change rates were estimated in, per issue:
+```{r}
+
+aggr_data %>% 
+  group_by(issue) %>% 
+  summarise(n_countries = n_distinct(sample)) %>% 
+  summarise(mean(n_countries))
+
+```
+
+Mixed-effects models:
+```{r}
+
+model0 <- trends_aa_data %>% 
+  lme4::lmer(data = ., formula = logit_est ~ (1|issue) + (1+hflv|sample))
+
+model1 <- trends_aa_data %>% 
+  lme4::lmer(data = ., formula = logit_est ~ hflv + (1|issue) + (1+hflv|sample))
+
+# Effects and R2:
+sjPlot::tab_model(model0)
+sjPlot::tab_model(model1)
+
+# AIC:
+AIC(model0)
+AIC(model1)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+

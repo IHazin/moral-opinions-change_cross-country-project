@@ -1,0 +1,135 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+library(tidyverse)
+
+```
+
+# Read data:
+```{r}
+
+# Time trends by issue and country:
+issp_trends_bysample <- read_rds("../data-processed/ISSP_trends-by-issue-and-country.rds")
+wvsevs_trends_bysample <- read_rds("../data-processed/WVS_trends-by-issue-and-country.rds")
+
+# Argument advantage data:
+aa_long <- read_rds("../data-processed/argument-advantage-data_US & Greece_long_clean.rds")
+
+```
+
+# Supplementary table 1: Opinion change rates estimated in WVS data. 
+```{r}
+
+wvsevs_trends_bysample %>% 
+  select(sample, label, logit_est) %>% 
+  mutate(logit_est = round(logit_est, 2)) %>% 
+  spread(label, logit_est) %>% 
+  rename(Country = sample) %>% 
+  kableExtra::kbl() %>% 
+  kableExtra::kable_classic()
+
+```
+
+# Supplementary table 2: Opinion change rates estimated in ISSP data. 
+```{r}
+
+issp_trends_bysample %>% 
+  select(sample, label, logit_est) %>% 
+  mutate(logit_est = round(logit_est, 2)) %>% 
+  spread(label, logit_est) %>% 
+  rename(Country = sample) %>% 
+  kableExtra::kbl() %>% 
+  kableExtra::kable_classic()
+
+```
+
+# Supplementary table 3: Wordings of opinion items.
+```{r}
+
+aa_long %>% 
+  distinct(source, issue, wording) %>%
+  rename(opinion = issue) %>% 
+  rename_all(~str_to_title(.)) %>% 
+  kableExtra::kbl() %>% 
+  kableExtra::kable_classic()
+
+```
+
+# Supplementary table 4: Robustness check: mixed-level analysis of the effect of argument advantage on opinion change rates. 
+See script '05_hypothesis2-robustness-check.Rmd'
+
+# Supplementary tabl 5: Sample size per item, per country (summed across survey years) in the WVS data.
+```{r}
+
+wvsevs_trends_bysample %>% 
+  unnest() %>% 
+  group_by(sample, label) %>% 
+  summarise(sum(n_sample)) %>% 
+  spread(label, `sum(n_sample)`) %>% 
+  rename(Country = sample) %>% 
+  kableExtra::kbl() %>% 
+  kableExtra::kable_classic()
+
+```
+
+# Supplementary table 6: Sample size per item, per country (summed across survey years) in the ISSP data.
+```{r}
+
+issp_trends_bysample %>% 
+  unnest() %>% 
+  group_by(sample, label) %>% 
+  summarise(sum(n_sample)) %>% 
+  spread(label, `sum(n_sample)`) %>% 
+  rename(Country = sample) %>% 
+  kableExtra::kbl() %>% 
+  kableExtra::kable_classic()
+
+```
+
+# Supplementary table 7: Number of times an item was included in the WVS.
+```{r}
+
+wvsevs_trends_bysample %>% 
+  unnest() %>% 
+  group_by(sample, label) %>% 
+  summarise(n_distinct(year)) %>% 
+  spread(label, `n_distinct(year)`) %>% 
+  rename(Country = sample) %>%
+  kableExtra::kbl() %>% 
+  kableExtra::kable_classic()
+
+```
+
+# Supplementary table 8: Number of times an item was included in the ISSP
+```{r}
+
+issp_trends_bysample %>% 
+  unnest() %>% 
+  group_by(sample, label) %>% 
+  summarise(n_distinct(year)) %>% 
+  spread(label, `n_distinct(year)`) %>% 
+  rename(Country = sample) %>%
+  kableExtra::kbl() %>% 
+  kableExtra::kable_classic()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

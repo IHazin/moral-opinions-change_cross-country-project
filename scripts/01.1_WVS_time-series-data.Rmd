@@ -1,0 +1,145 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+library(tidyverse)
+library(haven)
+library(stringr)
+
+```
+
+Instructions to obtain EVS/WVS 1981-2022 trend file (Integrated Values Survey - IVS):
+
+1. Go to https://www.worldvaluessurvey.org/WVSEVStrend.jsp
+
+2. Download the following data-sets and syntax file:
+  * EVS Trend File 1981-2017 (ZA7503_v3-0-0.dta.zip Stata)
+  * WVS Trend File 1981-2022 (3.0.0) (WVS_Trend_1981_2022_v3.0 Stata)
+  * EVS_WVS_MergeSyntax_Stata.zip
+  
+3. Run IVS merge syntax in Stata and save dta file as "../data-raw/Integrated_values_surveys_1981-2021.dta".
+
+! Obs.: The newest IVS data does not contain a 'sample' variable differentiating West from East Germany. We therefore used the 'sample' variable of the previous version of the IVS (EVS/WVS 1981-2014 trend file) for that purpose. From this older trend file, we used only German data concerning the five following variables: 
+  - Original respondent id (S006)
+  - Year (S020)
+  - Sample (S003A)
+  - Region (X048)*
+* Since the 'sample' variable in WVS wave 3 (1997) does not differentiate West from East Germany, for this wave we used 'Region' to separate the samples.
+  - Weight (S017A)
+The clean data-set is on this project's Github under the name 'Germany-sample-data.rds'. The chunk 'Clean data' below uses 'Original respondent id' and 'Year' to join the newest IVS data with the Germany sample data. 
+
+# Read data:
+```{r}
+
+wvsevs_full <- read_dta("../data-raw/Integrated_values_surveys_1981-2021.dta")
+
+germany_sample_data <- read_csv("../data-raw/Germany-sample-data.csv")
+
+```
+
+# Clean data:
+```{r}
+
+# Select relevant variables:
+wvsevs_clean <- wvsevs_full %>% 
+  select(source = S001,
+         wave_wvs = S002,
+         wave_evs = S002EVS,
+         country = S003,
+         resp_id = S007,
+         original_id = S006,
+         sex = X001,
+         age = X003,
+         weight = S017,
+         year = S020,
+         instructions_work = C061,
+         just_abortion = F120,
+         just_adultery = F128,
+         just_divorce = F121,
+         just_euthanasia = F122,
+         just_homosexuality = F118,
+         just_killing_selfdefence = F144,
+         just_lying = F127,
+         just_money_found = F140,
+         just_parents_children = F114C,
+         just_prostitution = F119,
+         just_sex_before_marriage = F135A,
+         just_soft_drugs = F126,
+         just_suicide = F123,
+         respect_love_parents = A025,
+         parents_responsibilities = A026,
+         sexual_freedom = D024,
+         woman_single_parent = D023)
+         
+wvsevs_clean <- wvsevs_clean %>%
+  mutate_at(vars(source, matches("wave"), country, sex), ~as_factor(.)) %>% 
+  mutate_at(vars(matches("wave"), country, sex), ~as.character(.)) %>% 
+  # Re-code missing values:
+  mutate_at(vars(instructions_work:woman_single_parent), ~ifelse(str_detect(., "NA"), NA_character_, .)) %>%
+  # Coalesce wave variables:
+  mutate(wave = coalesce(wave_wvs, wave_evs)) %>% 
+  select(source, wave, country, resp_id:woman_single_parent)
+
+# Clean country names and create sample variable:
+wvsevs_clean <- wvsevs_clean %>% 
+  mutate(country = case_when(
+            country == "Czechia" ~ "Czech Republic",
+            country == "Taiwan ROC" ~ "Taiwan",
+            country == "Dominican Rep." ~ "Dominican Republic",
+            TRUE ~ country)) %>% 
+  # Add Germany East/West split data:
+  left_join(germany_sample_data) %>% 
+  mutate(sample = ifelse(country == "Germany", sample, country),
+         weight = ifelse(country == "Germany", sample_weight, weight)) %>% 
+  # Drop Germany's last wave, given that it is not possible to distinguish between East and West Germany then:
+  drop_na(sample) %>% 
+  select(source:country, sample, year, resp_id, sex:woman_single_parent) %>% 
+  zap_labels()
+
+```
+
+# Re-code answers to 0/1:
+
+CODEBOOK:
+
+instructions_work: "Follow instructions" (1); "Must be convinced first", "Depends" (0)
+
+parents_responsibilities: "Parents´ duty is to do their best for their children even at" (1); "Parents have a life of their own and should not be asked to", "Neither" (0)
+
+respect_love_parents: "Always respect" (1); "Respect if earned", "Neither" (0)
+
+woman_single_parent: "Approve" (1); "Disapprove", "Depends" (0)
+
+sexual_freedom: "Agree" (1); "Disagree", "Neither"
+
+justifiables: "Always justifiable", 6-9 (1); "Never justifiable", 2:5 (0)
+
+```{r}
+
+wvsevs_data_recoded <- wvsevs_clean %>% 
+  mutate_at(vars(instructions_work, parents_responsibilities, respect_love_parents, woman_single_parent, sexual_freedom), ~ifelse(. == 1, 1, 0)) %>% 
+  mutate_at(vars(matches("just")), ~case_when(. %in% c(6:10) ~ 1, 
+                                              . %in% c(1:5) ~ 0,
+                                              . %in% c(-5:-1) ~ NA_real_))
+         
+# Reshape data to long format:
+wvsevs_data_long <- wvsevs_data_recoded %>%
+    select(-wave) %>%
+    pivot_longer(c(-source:-weight),
+                 names_to = "issue", 
+                 values_to = "opinion") %>%
+    drop_na(opinion)
+
+write_rds(wvsevs_data_long, "../data-processed/WVS-EVS_time-series-data_1981-2014_long.rds")
+
+```
+
+
+
+
+
+
+

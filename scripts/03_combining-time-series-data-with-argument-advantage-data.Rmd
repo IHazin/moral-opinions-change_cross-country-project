@@ -1,0 +1,272 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+library(tidyverse)
+library(haven)
+
+```
+
+# Read data:
+```{r}
+
+# ISSP time series data:
+issp_data <- read_rds("../data-processed/ISSP_time-series-data_1985-2018_long.rds") %>%
+  mutate(source = "ISSP")
+
+# WVS/EVS time series data:
+wvsevs_data <- read_rds("../data-processed/WVS-EVS_time-series-data_1981-2014_long.rds") %>% 
+  mutate(source = "WVS")
+  
+# Argument advantage data:
+aa_data <- read_rds("../data-processed/argument-advantage-data_US & Greece_clean.rds")
+
+```
+
+# Combine data-sets by sample (instead of country):
+```{r}
+
+# Correct sample names:
+sort(setdiff(issp_data$sample, wvsevs_data$sample))
+sort(setdiff(wvsevs_data$sample, issp_data$sample))
+
+issp_data <- issp_data %>%
+  mutate(sample = case_when(
+                    sample == "Germany/ West" ~ "West Germany",
+                    sample == "Germany/ East" ~ "East Germany",
+                    TRUE ~ sample),
+         sample = ifelse(is.na(sample), country, sample))
+
+# Combine data-sets:
+comb_issp_wvsevs <- bind_rows(issp_data, wvsevs_data)
+
+# Add aa data and create 'year_r' variable:
+comb_issp_wvsevs <- comb_issp_wvsevs %>% 
+  left_join(aa_data %>% 
+              select(source, issue, hflv)) %>% 
+  mutate(year_r = (year - 2000)/10)
+
+```
+
+# Aggregate data:
+```{r}
+
+aggr_data <- comb_issp_wvsevs %>% 
+  # Normalize weights so that the sum of weights is equal to the number of respondents in each country-year-issue:
+  group_by(source, issue, hflv, sample, country, year, year_r) %>% 
+  mutate(weight = weight*n()/sum(weight)) %>% 
+  # Calculate average opinion per country-year-issue:
+  summarise(mean_opinion = weighted.mean(opinion, weight),
+            n_agree = sum(opinion*weight),
+            n_sample = sum(weight),
+            n_disagree = n_sample - n_agree,
+            .groups = "drop")
+
+aggr_data <- aggr_data %>%
+  group_by(issue, hflv, sample) %>%
+  mutate(n_times = n_distinct(year)) %>%
+  ungroup()
+
+```
+
+# Clean aggregated data:
+
+## Filter out countries without free speech:
+
+Instructions:
+
+1. Go to https://rsf.org/en/index
+
+2. Download all csv World Press Freedom Index files from 2013 to 2022. 
+
+3. Place files into "../data-raw/World Press Freedom Index data/".
+```{r}
+
+# World Press Freedom Index data:
+wpfi_filenames <- dir("../data-raw/World Press Freedom Index data/")
+
+wpfi_data <- tibble(name = wpfi_filenames) %>% 
+  mutate(name = str_c("../data-raw/World Press Freedom Index data/", name),
+         full_data = map(name, ~read_csv2(.)),
+         full_data = map(full_data, ~mutate(., `Year (N)` = as.numeric(`Year (N)`))))
+
+# Clean data:
+wpfi_data <- wpfi_data %>% 
+  unnest() %>% 
+  select(year = `Year (N)`,
+         country = EN_country, 
+         Country_EN,
+         score = `Score N`, 
+         Score) %>% 
+  mutate(country = coalesce(country, Country_EN),
+         score = coalesce(score, Score)) %>% 
+  select(year, country, score)
+
+# Get average of World Press Freedom Index scores over the past ten years:
+wpfi_country_avg <- wpfi_data %>% 
+  group_by(country) %>% 
+  summarise(mean_score = mean(score))
+
+# Get list of countries with free speech:
+# Cut-off point: Average of World Press Freedom Index scores over the past ten years (2013-2022) NOT classified as "difficult" or "very serious".
+free_speech_countries <- wpfi_country_avg %>%
+  filter(mean_score >= 55) %>%
+  pull(country)
+
+
+# Filter out countries without free speech:
+# sort(setdiff(free_speech_countries, aggr_data$country))
+# sort(setdiff(aggr_data$country, free_speech_countries))
+aggr_data <- aggr_data %>% 
+  filter(country %in% c(free_speech_countries, "Great Britain", "Northern Ireland"))
+
+```
+
+## Drop sample-issues measured either once or twice but with less than four years in between measurements:
+```{r}
+
+issues_to_exclude <- aggr_data %>% 
+  group_by(sample, issue) %>%
+  summarise(n = n_distinct(year), dist = max(year) - min(year)) %>%
+  filter(n == 1|(n == 2 & dist < 5))
+
+aggr_data <- anti_join(aggr_data, issues_to_exclude)
+
+write_rds(aggr_data, "../data-processed/ISSP_WVS-EVS_aggregated-time-series-data-plus-aa-data_clean.rds")
+
+```
+
+## Select a set of countries in which the same set of issues have been measured:
+
+ISSP:
+```{r}
+
+issp_issues <- aggr_data %>%
+  filter(source == "ISSP", sample != "Israel/ Arabs") %>%
+  distinct(issue, sample) %>% 
+  group_by(issue) %>% 
+  mutate(n_cntries = n()) %>% 
+  group_by(issue, n_cntries) %>% 
+  nest() %>% 
+  arrange(desc(n_cntries))
+
+issp_issues <- issp_issues %>% 
+  rowid_to_column() %>% 
+  mutate(sample = map(data, "sample"))
+
+issp_issues$countries_in_common <- accumulate(issp_issues$sample, intersect)
+
+issp_issues <- issp_issues %>% 
+  mutate(n_cntrs_in_common = map_dbl(countries_in_common, length)) 
+
+# 15 ISSP issues have been measured in the same 14 countries:
+issp_issues %>%
+  ggplot(aes(rowid, n_cntrs_in_common)) +
+  geom_point() +
+  geom_vline(xintercept = 15) +
+  geom_hline(yintercept = 14) +
+  labs(x = "Number of countries", y = "Number of issues")
+
+issp_issues_set <- issp_issues %>% 
+  pull(issue) %>% 
+  .[1:15]
+
+issp_cntrs_set <- issp_issues[15,]$countries_in_common[[1]]
+
+issp_common_issues <- aggr_data %>%
+  filter(issue %in% issp_issues_set,
+         sample %in% issp_cntrs_set)
+
+```
+
+WVS/EVS:
+```{r}
+
+wvsevs_issues <- aggr_data %>%
+  filter(source == "WVS") %>%
+  distinct(issue, sample) %>% 
+  group_by(issue) %>% 
+  mutate(n_cntries = n()) %>% 
+  group_by(issue, n_cntries) %>% 
+  nest() %>% 
+  arrange(desc(n_cntries))
+
+wvsevs_issues <- wvsevs_issues %>% 
+  rowid_to_column() %>% 
+  mutate(sample = map(data, "sample"))
+
+wvsevs_issues$countries_in_common <- accumulate(wvsevs_issues$sample, intersect)
+
+wvsevs_issues <- wvsevs_issues %>% 
+  mutate(n_cntrs_in_common = map_dbl(countries_in_common, length)) 
+
+# 10 WVS/EVS issues have been measured in the same 53 countries:
+wvsevs_issues %>%
+  ggplot(aes(rowid, n_cntrs_in_common)) +
+  geom_point() +
+  geom_vline(xintercept = 10) +
+  geom_hline(yintercept = 53) +
+  labs(x = "Number of countries", y = "Number of issues")
+
+wvsevs_issues_set <- wvsevs_issues %>% 
+  pull(issue) %>% 
+  .[1:10]
+
+wvsevs_cntrs_set <- wvsevs_issues[10,]$countries_in_common[[1]]
+
+wvsevs_common_issues <- aggr_data %>%
+  filter(issue %in% wvsevs_issues_set,
+         sample %in% wvsevs_cntrs_set & 
+           # Keep only 50 pre-registered countries:
+           !sample %in% c("Bosnia and Herzegovina", "Brazil", "North Macedonia"))
+# ! We estimated the number of countries in the WVS/EVS using an older version of the combined trend data-set. The latest version of the data-set includes corrections that would allow us to use three more countries. We did not use them for the main analysis, however, because they were not listed in the pre-registration. They are included in the robustness check analysis presented in Table S4. We also checked that omission of the three countries does not affect the main results.
+
+```
+
+## Create issue labels:
+```{r}
+
+issp_common_issues <- issp_common_issues %>% 
+  mutate(label = case_when(issue == "abdefctw" ~ "Abort when defect wrong",
+                           issue == "abpoorw" ~ "Abort when poor wrong",
+                           issue == "cohabok" ~ "Cohabit unmarried",
+                           issue == "firstyou" ~ "Self first",
+                           issue == "helpfrds" ~ "Help poor friends",
+                           issue == "homosex1" ~ "Homosex wrong",
+                           issue == "hubbywrk" ~ "Trad. gender roles",
+                           issue == "immrghts" ~ "Immigrant rights",
+                           issue == "marlegit" ~ "Marry to have children",
+                           issue == "premars1" ~ "Premarital sex wrong",
+                           issue == "protest1" ~ "Protest meetings",
+                           issue == "protest3" ~ "Protest marches",
+                           issue == "racmeet" ~ "Racist meetings",
+                           issue == "verdict" ~ "Convict innocent",
+                           issue == "xmarsex1" ~ "Extramarital sex wrong",
+                           TRUE ~ NA_character_))
+
+write_rds(issp_common_issues, "../data-processed/ISSP_15-issues-measured-in-the-same-14-countries.rds")
+
+ 
+wvsevs_common_issues <- wvsevs_common_issues %>%
+  mutate(label = case_when(issue == "instructions_work" ~ "Following instructions",
+                           issue == "just_abortion" ~ "Abortion",
+                           issue == "just_divorce" ~ "Divorce",
+                           issue == "just_euthanasia" ~ "Euthanasia",
+                           issue == "just_homosexuality" ~ "Homosexuality",
+                           issue == "just_prostitution" ~ "Prostitution",
+                           issue == "just_suicide" ~ "Suicide",
+                           issue == "parents_responsibilities" ~ "Parents’ responsibilities",
+                           issue == "respect_love_parents" ~ "Respect & love for parents",
+                           issue == "woman_single_parent" ~ "Woman as a single parent",
+                           TRUE ~ NA_character_))
+
+write_rds(wvsevs_common_issues, "../data-processed/WVS_10-issues-measured-in-the-same-50-countries.rds")
+  
+```
+
+
+
+

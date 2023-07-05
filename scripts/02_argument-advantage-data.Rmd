@@ -1,0 +1,309 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+library(tidyverse)
+library(haven)
+
+```
+
+# Read data:
+```{r}
+
+# Argument advantage data - U.S. and Greece - long format:
+aa_data_long <- read_csv("../data-raw/argument-advantage-data_US & Greece_feb-2023_long.csv")
+
+```
+
+# Exclude participants who scored less than 6 on wordsum:
+```{r}
+
+# Participants to exclude from U.S. sample:
+toexclude_us <- aa_data_long %>% 
+  filter(country == "United States of America") %>% 
+  select(id, matches("ws")) %>% 
+  unique() %>% 
+  pivot_longer(cols = c(matches("ws")),
+               names_to = "var",
+               values_to = "value") %>%
+  mutate(correct = case_when(
+    var == "ws1" & value == 4 ~ 1,
+    var == "ws2" & value == 2 ~ 1,
+    var == "ws3" & value == 5 ~ 1,
+    var == "ws4" & value == 5 ~ 1,
+    var == "ws5" & value == 1 ~ 1,
+    var == "ws6" & value == 4 ~ 1,
+    var == "ws7" & value == 3 ~ 1,
+    var == "ws8" & value == 1 ~ 1,
+    var == "ws9" & value == 5 ~ 1,
+    var == "ws10" & value == 1 ~ 1,
+    TRUE ~ 0)) %>% 
+  group_by(id) %>% 
+  summarise(sum(correct)) %>% 
+  filter(`sum(correct)` < 6) %>% 
+  pull(id)
+
+# Participants to exclude from Greek sample:
+toexclude_greece <- aa_data_long %>% 
+  filter(country == "Greece") %>%  
+  select(id, matches("ws")) %>% 
+  unique() %>% 
+  pivot_longer(cols = c(matches("ws")),
+               names_to = "var",
+               values_to = "value") %>% 
+  group_by(id) %>% 
+  summarise(sum(value)) %>% 
+  filter(`sum(value)` < 6) %>% 
+  pull(id)
+
+# 15 participants in total were excluded.
+aa_data_long <- aa_data_long %>% 
+  filter(!id %in% toexclude_us & !id %in% toexclude_greece)
+  
+```
+
+# Calculate pro-positions' argument advantage:
+```{r}
+
+# Create a 'moral foundation' variable:
+aa_data_long <- aa_data_long %>% 
+  mutate(argument = as.character(argument),
+         mf = fct_collapse(argument,
+                           harm = c("1", "2", "3"),
+                           fair = c("4", "5", "6"),
+                           ingr = c("7", "8", "9"),
+                           auth = c("10", "11", "12"),
+                           puri = c("13", "14", "15"),
+                           libe = c("16", "17", "18"),
+                           viol = c("19", "20", "21")))
+
+# Re-scale applicability ratings so that values range between 0 and 1:
+range01 <- function(x, ...){
+  (x - min(x, ...)) / (max(x, ...) - min(x, ...))
+  }
+
+aa_data_long <- aa_data_long %>% 
+  mutate(value_sc = range01(value, na.rm = TRUE))
+
+write_rds(aa_data_long, "../data-processed/argument-advantage-data_US & Greece_long_clean.rds")
+
+# Calculate moral foundations' average applicability:
+mf_app <- aa_data_long %>% 
+  group_by(source, issue, position, mf, argument) %>% 
+  summarise(value_sc = mean(value_sc, na.rm = TRUE)) %>% 
+  group_by(source, issue, position, mf) %>% 
+  summarise(value_sc = mean(value_sc))  
+
+# Calculate pro-positions' argument advantage:
+mf_adv <- mf_app %>% 
+  spread(position, value_sc) %>% 
+  mutate(arg_adv = yes - no) %>% 
+  select(-no, -yes) %>% 
+  spread(mf, arg_adv) %>% 
+  mutate(hflv = (harm + fair + libe + viol)/4) %>% 
+  # Reverse hlfv measure of 'premars1':
+  mutate(hflv = ifelse(issue == "premars1", hflv*-1, hflv))
+
+```
+
+# Descriptive statistics:
+```{r}
+
+# Sample sizes:
+sample_sizes <- aa_data_long %>% 
+  distinct(id, country) %>% 
+  group_by(country) %>% 
+  summarise(n_respondents = n_distinct(id)) %>% 
+  bind_rows(aa_data_long %>% 
+              summarise(n_respondents = n_distinct(id)) %>% 
+              mutate(country = "Combined")) %>% 
+  rename(`Country:` = country,
+         `Number of respondents:` = n_respondents)
+
+# Number of exclusions based on English proficiency:
+excluded <- tibble(
+  `Country:` = "United States of America",
+  `Excluded:` = length(toexclude_us)) %>% 
+  bind_rows(tibble(
+  `Country:` = "Greece",
+  `Excluded:` = length(toexclude_greece))) %>% 
+  bind_rows(tibble(
+  `Country:` = "Combined",
+  `Excluded:` = length(toexclude_us) + length(toexclude_greece)))
+
+# Gender:
+gender_stats <- aa_data_long %>% 
+  distinct(id, country, gender) %>% 
+  group_by(country, gender) %>% 
+  summarise(n_respondents = n_distinct(id)) %>% 
+  spread(gender, n_respondents) %>% 
+  bind_rows(aa_data_long %>%
+              distinct(id, country, gender) %>% 
+              group_by(gender) %>% 
+              summarise(n_respondents = n_distinct(id)) %>% 
+              spread(gender, n_respondents) %>% 
+              mutate(country = "Combined")) %>% 
+  rename(`Country:` = country)
+
+# Age:
+age_stats <- aa_data_long %>% 
+  distinct(id, country, age) %>% 
+  group_by(country) %>% 
+  summarise(`Mean age:` = round(mean(age), 2),
+            `SD age:` = round(sd(age), 2)) %>% 
+  bind_rows(aa_data_long %>%
+              distinct(id, age) %>% 
+              summarise(`Mean age:` = round(mean(age), 2),
+                        `SD age:` = round(sd(age), 2)) %>% 
+              mutate(country = "Combined")) %>% 
+  rename(`Country:` = country)
+
+(descriptive_stats <- sample_sizes %>% 
+  left_join(excluded) %>% 
+  left_join(gender_stats) %>% 
+  left_join(age_stats) %>% 
+  kableExtra::kbl() %>% 
+  kableExtra::kable_classic())
+  
+```
+
+Number of times items were judged (combined for U.S. and Greek samples):
+```{r}
+
+aa_data_long %>% 
+  distinct(id, issue, answer) %>% 
+  group_by(issue) %>% 
+  count() %>% 
+  ungroup() %>% 
+  summarise(`Number of times items were judged, on average:` = mean(n),
+            `Item judged the least:` = min(n)) %>% 
+  kableExtra::kbl()
+  
+```
+
+# Extra: data collection for hypothesis 2 - robustness check:
+```{r}
+
+extra_hflv_long <- read_csv("../data-raw/argument-advantage-data_additional-issues_jun-2023_long.csv")
+
+```
+
+Exclude participants who scored less than 6 on wordsum:
+```{r}
+
+# Participants to exclude:
+toexclude <- extra_hflv_long %>% 
+  select(id, matches("ws")) %>% 
+  unique() %>% 
+  pivot_longer(cols = c(matches("ws")),
+               names_to = "var",
+               values_to = "value") %>%
+  group_by(id) %>% 
+  summarise(sum(value)) %>% 
+  filter(`sum(value)` < 6) %>% 
+  pull(id)
+
+# 5 participants were excluded.
+extra_hflv_long <- extra_hflv_long %>% 
+  filter(!id %in% toexclude)
+
+```
+
+Calculate pro-positions' argument advantage:
+```{r}
+
+# Create a 'moral foundation' variable:
+extra_hflv_long <- extra_hflv_long %>% 
+  mutate(argument = as.character(argument),
+         mf = fct_collapse(argument,
+                           harm = c("1", "2", "3"),
+                           fair = c("4", "5", "6"),
+                           ingr = c("7", "8", "9"),
+                           auth = c("10", "11", "12"),
+                           puri = c("13", "14", "15"),
+                           libe = c("16", "17", "18"),
+                           viol = c("19", "20", "21")))
+
+# Re-scale applicability ratings so that values range between 0 and 1:
+range01 <- function(x, ...){
+  (x - min(x, ...)) / (max(x, ...) - min(x, ...))
+  }
+
+extra_hflv_long <- extra_hflv_long %>% 
+  mutate(value_sc = range01(value, na.rm = TRUE))
+
+# Calculate moral foundations' average applicability:
+extra_mf_app <- extra_hflv_long %>% 
+  group_by(issue, position, mf, argument) %>% 
+  summarise(value_sc = mean(value_sc, na.rm = TRUE)) %>% 
+  group_by(issue, position, mf) %>% 
+  summarise(value_sc = mean(value_sc))  
+
+# Calculate pro-positions' argument advantage:
+extra_mf_adv <- extra_mf_app %>% 
+  spread(position, value_sc) %>% 
+  mutate(arg_adv = yes - no) %>% 
+  select(-no, -yes) %>% 
+  spread(mf, arg_adv) %>% 
+  mutate(hflv = (harm + fair + libe + viol)/4)
+
+# Add 'just_sex_before_marriage', whose hflv is the inverse of that of the ISSP issue 'premars1':
+extra_mf_adv <- extra_mf_adv %>% 
+  bind_rows(mf_adv %>% 
+              filter(issue == "premars1") %>% 
+              mutate_at(vars(harm:hflv), ~.*-1) %>% 
+              mutate(issue = "just_sex_before_marriage")) %>% 
+  mutate(source = "WVS/EVS")
+
+```
+
+Demographics:
+```{r}
+
+# Number of moral items:
+extra_hflv_long %>% 
+  distinct(issue) %>% 
+  count()
+# Obs.: For the WVS issue 'just_sex_before_marriage' we simply used the reversed aa of the ISSP issue 'premars1'. Thus, there are 8 new issues in the complementary analysis. 
+
+# How many times each item was rated?
+extra_hflv_long %>% 
+  group_by(issue) %>% 
+  summarise(n_resp = n_distinct(id)) %>% 
+  summarise(min(n_resp),
+            mean(n_resp))
+
+# Number of respondents:
+extra_hflv_long %>% 
+  distinct(id) %>% 
+  count()
+
+# Average age:
+extra_hflv_long %>% 
+  distinct(id, age) %>% 
+  summarise(mean(age),
+            sd(age))
+
+# Proportion of women:
+extra_hflv_long %>%
+  distinct(id, gender) %>% 
+  mutate(gender_01 = gender - 1) %>% 
+  summarise(mean(gender_01))
+  
+```
+
+# Combine argument advantage data-sets:
+```{r}
+
+mf_adv <- mf_adv %>% 
+  bind_rows(extra_mf_adv)
+
+write_rds(mf_adv, "../data-processed/argument-advantage-data_US & Greece_clean.rds")
+
+```
+
+
+
