@@ -82,7 +82,7 @@ Mixed-effects models:
 ```{r}
 
 model0 <- trends_aa_data %>% 
-  lme4::lmer(data = ., formula = logit_est ~ (1|issue) + (1+hflv|sample))
+  lme4::lmer(data = ., formula = logit_est ~ (1|issue) + (1|sample))
 
 model1 <- trends_aa_data %>% 
   lme4::lmer(data = ., formula = logit_est ~ hflv + (1|issue) + (1+hflv|sample))
