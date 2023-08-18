@@ -1,0 +1,23 @@
+Variable name:,Variable description:
+id,Respondent ID
+country,Respondent's country
+age,Respondent's age
+gender,Responden't gender
+ws1,Vocabulary test item 1: Space
+ws2,Vocabulary test item 2: Lift
+ws3,Vocabulary test item 3: Concern
+ws4,Vocabulary test item 4: Broaden
+ws5,Vocabulary test item 5: Blunt
+ws6,Vocabulary test item 6: Accustom
+ws7,Vocabulary test item 7: Pact
+ws8,Vocabulary test item 8: Solicitor
+ws9,Vocabulary test item 9: Allusion
+ws10,Vocabulary test item 10: Animosity
+source,Data source (WVS or ISSP)
+issue,Moral issue
+answer,Respondent's own position on moral issue (1 = Yes/agreement; 2 = No/disagreement)
+position,Position to which the respondent rated the argument's applicability
+type,Whether the position to which the respondent rated the argument's applicability is the respondent's own position (self) or not (other)
+argument,Moral argument
+value,Respondent's rating of the argument's applicability to the position
+wording,Wording of the moral issue
